@@ -18,7 +18,6 @@ type arg =
 
 type instruction =
   | IMov of arg * arg
-
   | IAdd of arg * arg
   | ISub of arg * arg
   | IMul of arg * arg
@@ -82,11 +81,11 @@ let s_to_asm (s : size) : string =
 let rec arg_to_asm (a : arg) : string =
   match a with
     | Const(n) -> sprintf "%d" n
-    | HexConst(n) -> failwith "TODO: HexConst"
+    | HexConst(n) -> sprintf "0x%X" n 
     | Reg(r) -> r_to_asm r
-    | RegOffset(n, r) -> failwith "TODO: RegOffset"
-    | Sized(s, a) ->
-      failwith "TODO: Sized"
+    | RegOffset(n, r) -> if n>=0 then sprintf "[%s-%d]" (r_to_asm(r)) (n * 4)
+                         else sprintf "[%s-%d]" (r_to_asm r) (n * -1 * 4)
+    | Sized(s, a) -> sprintf "%s %s" (s_to_asm s) (arg_to_asm a)
 
 let i_to_asm (i : instruction) : string =
   match i with
@@ -99,39 +98,39 @@ let i_to_asm (i : instruction) : string =
     | IMul(dest, to_mul) ->
       sprintf "  imul %s, %s" (arg_to_asm dest) (arg_to_asm to_mul)
     | IAnd(dest, mask) ->
-      failwith "TODO: IAnd"
+      sprintf "  and  %s, %s" (arg_to_asm dest) (arg_to_asm mask)
     | IOr(dest, mask) ->
-      failwith "TODO: IOr"
+      sprintf "  or %s, %s" (arg_to_asm dest) (arg_to_asm mask)
     | IXor(dest, mask) ->
-      failwith "TODO: IXor"
+      sprintf "  xor %s, %s" (arg_to_asm dest) (arg_to_asm mask)
     | IShr(dest, to_shift) ->
-      failwith "TODO: IShr"
+      sprintf "  shr %s, %s" (arg_to_asm dest) (arg_to_asm to_shift)
     | IShl(dest, to_shift) ->
-      failwith "TODO: IShl"
+      sprintf "  shl %s, %s" (arg_to_asm dest) (arg_to_asm to_shift)
     | ICmp(left, right) ->
-      failwith "TODO: ICmp"
+      sprintf "  cmp %s, %s" (arg_to_asm left) (arg_to_asm right)
     | IPush(arg) ->
-      failwith "TODO: IPush"
+      sprintf "  push %s" (arg_to_asm arg)
     | IPop(arg) ->
-      failwith "TODO: IPop"
+      sprintf "  pop %s" (arg_to_asm arg)
     | ICall(str) ->
-      failwith "TODO: ICall"
+      sprintf "  call %s" (str)
     | ILabel(name) ->
-      failwith "TODO: ILabel"
+      sprintf "%s:" name 
     | IJne(label) ->
-      failwith "TODO: IJne"
+      sprintf "jne near %s" label 
     | IJe(label) ->
-      failwith "TODO: IJe"
+      sprintf "je near %s" label 
     | IJno(label) ->
-      failwith "TODO: IJno"
+      sprintf "jno near %s" label 
     | IJo(label) ->
-      failwith "TODO: IJo"
+      sprintf "jo near %s" label 
     | IJmp(label) ->
-      failwith "TODO: IJmp"
+      sprintf "jmp near %s" label 
     | IJl(label) ->
-      failwith "TODO: IJl"
+      sprintf "jl near %s" label 
     | IJg(label) ->
-      failwith "TODO: IJg"
+      sprintf "jg near %s" label 
     | IRet ->
       " ret"
 
@@ -153,17 +152,37 @@ let const_true = HexConst(0xffffffff)
 let const_false = HexConst(0x7fffffff)
 
 (* You want to be using C functions to deal with error output here. *)
-let throw_err code = failwith "TODO: throw_err"
-
+let throw_err code = [IPush(Sized(DWORD_PTR, Const(code))); ICall(("error"));]
 let error_overflow = "error_overflow"
 let error_non_int  = "error_non_int"
 let error_non_bool = "error_non_bool"
 
 let check_overflow = IJo(error_overflow)
 
-let check_num = failwith "TODO: check_num"
+let check_num = [
+        IMov(RegOffset(1, ESP), Reg(EAX)); 
+        IAnd(Reg(EAX), Sized(DWORD_PTR, HexConst(0x1)));
+        ICmp(Reg(EAX), Sized(DWORD_PTR, HexConst(0x0)));
+        IJne(error_non_int);
+        IMov(Reg(EAX) , RegOffset(1,ESP));
+       ] 
 
-let check_nums arg1 arg2 = failwith "TODO: check_nums"
+let check_nums arg1 arg2 = 
+        [IMov(Reg(EAX), arg1) ] @ check_num 
+        @ [IMov(Reg(EAX), arg2);] @ check_num 
+
+let rec exist_once (target : 'a) (pile : 'a list) : bool =
+  match pile with
+    | [] -> false
+    | head::tail -> if target = head then true else exist_once target tail
+
+let rec exist_many (l : 'a list) : 'a option =
+  match l with
+    | [] -> None
+    | [x] -> None
+    | head::tail -> if (exist_once head tail) then Some(head) else exist_many tail
+
+
 
 let rec well_formed_e (e : expr) (env : (string * int) list) : string list =
   match e with
@@ -175,13 +194,24 @@ let rec well_formed_e (e : expr) (env : (string * int) list) : string list =
         | Some(_) -> []
       end
     | EPrim1(op, e) ->
-      failwith "TODO: well_formed_e EPrim1"
+      well_formed_e e env
     | EPrim2(op, left, right) ->
-      failwith "TODO: well_formed_e EPrim2"
+      (well_formed_e left env) @ (well_formed_e right env)
     | EIf(cond, thn, els) ->
-      failwith "TODO: well_formed_e EIf"
-    | ELet(binds, body) ->
-      failwith "TODO: well_formed_e ELet"
+      (well_formed_e cond env) @ (well_formed_e thn env)
+      @ (well_formed_e thn env)
+    | ELet(binds, body) -> 
+      let vars = List.map fst binds in
+      let bindings = List.map (fun x -> (x,1)) vars in
+      let context = well_formed_e body (bindings @ env) in
+      begin match exist_many vars with
+        | None -> context
+        | Some(name) -> 
+            ("Multiple bindings for variable identifier " ^ name)::context
+      end
+    
+
+     
 
 let check (e : expr) : string list =
   match well_formed_e e [] with
@@ -191,23 +221,92 @@ let check (e : expr) : string list =
 let rec compile_expr (e : expr) (si : int) (env : (string * int) list) : instruction list =
   match e with
     | ENumber(n) ->
-      failwith "TODO: compile_expr ENumber"
+      [IMov(Reg(EAX), Const(n));
+       IShl(Reg(EAX), Const(1))]
     | EBool(b) ->
       let c = if b then const_true else const_false in
       [ IMov(Reg(EAX), c) ]
-    | EId(name) ->
-      failwith "TODO: compile_expr EId"
+    | EId(name) -> 
+        begin match find env name with
+            | Some(location) ->[IMov(Reg(EAX), RegOffset(location, ESP))]
+            | None-> failwith( "Variable identifier" ^ name ^" unbounded")
+        end
     | EPrim1(op, e) ->
-      failwith "TODO: compile_expr EPrim1"
+     let argis = (compile_expr e si env) in
+     begin match op with 
+        | Add1 -> argis@ (check_num) @[IAdd(Reg(EAX), Const(2)); check_overflow]
+        | Sub1 ->  argis @ check_num  @[ISub(Reg(EAX), Const(2)); check_overflow]
+        | IsNum -> let l_isNum = gen_temp "l_isNum" in
+                argis@[IAnd (Reg(EAX), Sized(DWORD_PTR, HexConst(0x1)));
+                       ICmp(Reg(EAX), Sized(DWORD_PTR, HexConst(0x0)));
+                       IJe(l_isNum); IMov(Reg(EAX), const_false); IRet;
+                       ILabel(l_isNum);IMov(Reg(EAX), const_true);]
+        | IsBool-> let isBool = gen_temp "isBool" in 
+                argis@[IAnd(Reg(EAX), Sized(DWORD_PTR, HexConst(0x1)));
+                       ICmp(Reg(EAX), Sized(DWORD_PTR, HexConst(0x0)));
+                       IJne(isBool); IMov(Reg(EAX), const_false); IRet;
+                       ILabel(isBool); IMov(Reg(EAX), const_true);]
+     end
     | EPrim2(op, el, er) ->
-      failwith "TODO: compile_expr EPrim2"
+      let arg1 = (compile_expr el (si) env) in
+        let arg2 = (compile_expr er (si) env) in
+         let l_pass = gen_temp "l_pass" in
+         let l_finished = gen_temp "l_finished" in
+           begin match op with
+            | Plus ->   arg1@check_num@[IMov(RegOffset((si+1), ESP ), Reg(EAX))]@
+                  arg2@check_num@[IMov(RegOffset((si+2), ESP), Reg(EAX))]
+                  @[IMov(Reg(EAX), (RegOffset((si+1), ESP)))]
+                  @[IAdd (Reg(EAX), (RegOffset((si+2), ESP ))); check_overflow]
+            | Minus ->  arg1@check_num@[IMov(RegOffset((si+1), ESP ), Reg(EAX))]@
+                  arg2@check_num@[IMov(RegOffset((si+2), ESP), Reg(EAX))]
+                  @[IMov(Reg(EAX), (RegOffset((si+1), ESP)))]
+                  @[ISub (Reg(EAX), (RegOffset((si+2), ESP ))); check_overflow]
+            | Times ->  arg1@check_num@[IMov(RegOffset((si+1), ESP ), Reg(EAX))]@
+                  arg2@check_num@[IMov(RegOffset((si+2), ESP), Reg(EAX))]
+                  @[IMov(Reg(EAX), (RegOffset((si+1), ESP)))]
+                  @[IMul (Reg(EAX), (RegOffset((si+2), ESP ))); check_overflow]
+                  @[IShr(Reg(EAX), Const(1))] 
+            | Less -> arg1@check_num@[IMov(RegOffset((si+1), ESP ), Reg(EAX))]@
+                  arg2@check_num@[IMov(RegOffset((si+2), ESP), Reg(EAX))]
+                  @[IMov(Reg(EAX), (RegOffset((si+1), ESP)));
+                    ICmp (Reg(EAX), (RegOffset((si+2), ESP ))); IJl(l_pass);
+                    IMov(Reg(EAX), const_false); IJmp(l_finished);
+                    ILabel(l_pass); IMov(Reg(EAX), const_true);
+                    ILabel(l_finished);] 
+            | Greater -> arg1@check_num@[IMov(RegOffset((si+1), ESP ), Reg(EAX))]@
+                  arg2@check_num@[IMov(RegOffset((si+2), ESP), Reg(EAX))]
+                  @[IMov(Reg(EAX), (RegOffset((si+1), ESP)));
+                    ICmp (Reg(EAX), (RegOffset((si+2), ESP ))); IJg(l_pass);
+                    IMov(Reg(EAX), const_false); IJmp(l_finished);
+                    ILabel(l_pass); IMov(Reg(EAX), const_true);
+                    ILabel(l_finished);] 
+            | Equal ->  arg1@check_num@[IMov(RegOffset((si+1), ESP ), Reg(EAX))]@
+                  arg2@check_num@[IMov(RegOffset((si+2), ESP), Reg(EAX))]
+                  @[IMov(Reg(EAX), (RegOffset((si+1), ESP)));
+                    ICmp (Reg(EAX), (RegOffset((si+2), ESP ))); IJe(l_pass);
+                    IMov(Reg(EAX), const_false); IJmp(l_finished);
+                    ILabel(l_pass); IMov(Reg(EAX), const_true);
+                    ILabel(l_finished);] 
+         end
     | EIf(cond, thn, els) ->
-      failwith "TODO: compile_expr EIf"
-    | ELet([], body) ->
-      failwith "TODO: compile_expr ELet1"
+      let l_then = gen_temp "then" in
+      let l_else = gen_temp "else" in
+      let l_end = gen_temp "end" in
+      let e_cond = (compile_expr cond si env) in
+      let e_then = (compile_expr thn si env) in
+      let e_else = (compile_expr els si env) in
+      e_cond @ [ ICmp(Reg(EAX), const_true); IJe(l_then);
+                 ICmp(Reg(EAX), const_false); IJe(l_else);
+                 IJmp((error_non_bool)); 
+                 ILabel(l_then)
+                  ] @       
+      e_then @ [ IJmp((l_end)); ILabel(l_else) ] @
+      e_else @ [ ILabel(l_end) ]
+    | ELet([], body) -> compile_expr body si env
     | ELet((x, ex)::binds, body) ->
-      failwith "TODO: compile_expr ELet2"
-
+        let valis = compile_expr ex (si + 1) env in
+            let bodyis = compile_expr body (si+1) ((x,si)::env) in
+            valis @ [IMov(RegOffset(si,ESP), Reg(EAX))]@bodyis
 let compile_to_string prog =
   let static_errors = check prog in
   let prelude = "section .text
