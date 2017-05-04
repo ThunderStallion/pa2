@@ -28,11 +28,15 @@ let comp1 = "(43 - 3) - 24 * 2"
 let t_if = "let x = true in if x: 42 else: 13"
 let elet1 = "let x = sub1(5), x = 3, x = 10, b = 2, b = 3, a = 2, a = 3 in y + 1"
 let elet2 = "let x = 1 in (let x = 2 in x)"
+let elet4 = "let x = 2 in let y = 3 in x +y"
+let elet5 = "let x = 2, y = 3 in x + y"
 let suite =
 "suite">:::
  [
+  t "elet5" elet5 "5";
+  t "elet4" elet4 "5";
   t "elet2" elet2 "2";
-  t "elet1" elet1 "3";
+  t "elet1" elet1 "Error: Compile error: Multiple bindings for variable identifier x \nMultiple bindings for variable identifier b\nMultiple bindings for variable identifier a\n\nUnbound identifier: y";
   t "t_if" t_if "42";
   t "comp1" comp1 "32";
   t "gt2" gt2 "true";

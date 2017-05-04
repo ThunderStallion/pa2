@@ -176,13 +176,33 @@ let rec exist_once (target : 'a) (pile : 'a list) : bool =
     | [] -> false
     | head::tail -> if target = head then true else exist_once target tail
 
-let rec exist_many (l : 'a list) : 'a option =
+let rec exist_many (l : 'a list) : 'a list =
   match l with
-    | [] -> None
-    | [x] -> None
-    | head::tail -> if (exist_once head tail) then Some(head) else exist_many tail
+    | [] -> []
+    | [x] -> []
+    | head::tail -> if (exist_once head tail) then head::(exist_many tail) else exist_many tail
 
 
+let remove_elt e l =
+  let rec go l acc = match l with
+      | [] -> List.rev acc
+          | x::xs when e = x -> go xs acc
+              | x::xs -> go xs (x::acc)
+                in go l []
+
+
+let remove_duplicates l =
+  let rec go l acc = match l with
+      | [] -> List.rev acc
+          | x :: xs -> go (remove_elt x xs) (x::acc)
+            in go l []
+
+let rec dup_errors(l : 'a list) : string =
+  match l with
+    | [] -> "" 
+    | [x] -> "Multiple bindings for variable identifier " ^ x ^"\n"
+    | head::tail -> "Multiple bindings for variable identifier " ^ head ^"\n" ^
+                    (dup_errors tail)
 
 let rec well_formed_e (e : expr) (env : (string * int) list) : string list =
   match e with
@@ -200,7 +220,26 @@ let rec well_formed_e (e : expr) (env : (string * int) list) : string list =
     | EIf(cond, thn, els) ->
       (well_formed_e cond env) @ (well_formed_e thn env)
       @ (well_formed_e thn env)
-    | ELet(binds, body) -> 
+    | ELet([] , body) -> well_formed_e body env
+    | ELet(binds, body) ->
+      let vars = List.map fst binds in
+      let bindings = List.map (fun x-> (x,1)) vars in
+      let context = well_formed_e body (bindings @ env) in
+      begin match exist_many vars with
+        | [] -> context
+        | head::tail -> 
+                    (dup_errors (remove_duplicates((head::tail)))):: context
+      end
+(*
+      let vars = List.map fst binds in
+      let bindings = List.map ( fun x-> (x,1)) vars in
+      let context = well_formed_e body (bindings @ env) in
+      begin match exist_many vars with
+        | [] -> context
+        | head::tail -> (dup_errors (remove_duplicates((head::tail))))::context
+      end
+ *)     
+  (* 
       let vars = List.map fst binds in
       let bindings = List.map (fun x -> (x,1)) vars in
       let context = well_formed_e body (bindings @ env) in
@@ -209,8 +248,7 @@ let rec well_formed_e (e : expr) (env : (string * int) list) : string list =
         | Some(name) -> 
             ("Multiple bindings for variable identifier " ^ name)::context
       end
-    
-
+*)
      
 
 let check (e : expr) : string list =
@@ -229,7 +267,7 @@ let rec compile_expr (e : expr) (si : int) (env : (string * int) list) : instruc
     | EId(name) -> 
         begin match find env name with
             | Some(location) ->[IMov(Reg(EAX), RegOffset(location, ESP))]
-            | None-> failwith( "Variable identifier" ^ name ^" unbounded")
+            | None-> failwith( "Variable identifier " ^ name ^" unbounded")
         end
     | EPrim1(op, e) ->
      let argis = (compile_expr e si env) in
